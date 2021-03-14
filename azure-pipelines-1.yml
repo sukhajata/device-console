@@ -1,0 +1,113 @@
+# Docker
+# Build and push an image to Azure Container Registry
+# https://docs.microsoft.com/azure/devops/pipelines/languages/docker
+
+trigger:
+- master
+
+resources:
+- repo: self
+
+variables:
+  # Container registry service connection established during pipeline creation
+  dockerRegistryServiceConnection: 'test'
+  imageRepository: 'powerpilotadmin'
+  containerRegistry: 'powerpilotregistry.azurecr.io'
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+  devTag: 'dev-$(Build.BuildId)'
+  stgTag: 'stg-$(Build.BuildId)'
+  prodTag: 'prod-$(Build.BuildId)'
+  
+  # Agent VM image name
+  vmImageName: 'ubuntu-20.04'
+  agentName: 'australiasoutheast'
+
+stages:
+- stage: Build
+  displayName: Build and push stage
+  jobs:  
+  - job: Build
+    displayName: Build
+    pool: #$(agentName)
+      vmImage: $(vmImageName)
+    steps:
+    - task: Docker@2
+      displayName: Build and push an image to container registry
+      inputs:
+        command: buildAndPush
+        repository: $(imageRepository)
+        dockerfile: $(dockerfilePath)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(devTag)
+
+
+#pull the container and re tag it for staging  
+- stage: PushStaging
+  displayName: Push with stg tag
+  jobs: 
+  - deployment: PushStaging
+    displayName: push with stg tag
+    pool: #$(agentName)
+      vmImage: $(vmImageName)
+    # creates an environment if it doesn't exist. Environment should already exist with approval check created.
+    environment: 'ppcores1.staging'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: Docker@2
+            displayName: login to ACR
+            inputs:
+              command: login
+              containerRegistry: $(dockerRegistryServiceConnection)
+
+          - bash: |
+              echo "docker pull ${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${DEV_TAG}"
+              docker pull ${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${DEV_TAG}
+              echo "docker tag ${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${DEV_TAG}  ${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${STG_TAG}"
+              docker tag ${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${DEV_TAG}  ${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${STG_TAG}
+              echo "docker push ${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${STG_TAG}"
+              docker push ${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${STG_TAG}
+
+              echo "Deployed ${STG_TAG}"
+            env:
+              CONTAINER_REGISTRY: $(containerRegistry)
+              IMAGE_REPOSITORY: $(imageRepository)
+              DEV_TAG: $(devTag)
+              STG_TAG: $(stgTag)
+
+#pull the container and re tag it for prod  
+- stage: PushProd
+  displayName: Push to production
+  jobs: 
+  - deployment: PushProd
+    displayName: push with prod tag
+    pool: #$(agentName)
+      vmImage: $(vmImageName)
+    # creates an environment if it doesn't exist. Environment should already exist with approval check created.
+    environment: 'ppcores1.prod'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: Docker@2
+            displayName: login to ACR
+            inputs:
+              command: login
+              containerRegistry: $(dockerRegistryServiceConnection)
+
+          - bash: |
+              echo "docker pull ${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${STG_TAG}"
+              docker pull ${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${STG_TAG}
+              echo "docker tag ${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${STG_TAG}  ${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${PROD_TAG}"
+              docker tag ${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${STG_TAG}  ${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${PROD_TAG}
+              echo "docker push ${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${PROD_TAG}"
+              docker push ${CONTAINER_REGISTRY}/${IMAGE_REPOSITORY}:${PROD_TAG}
+
+              echo "Deployed ${PROD_TAG}"
+            env:
+              CONTAINER_REGISTRY: $(containerRegistry)
+              IMAGE_REPOSITORY: $(imageRepository)
+              STG_TAG: $(stgTag)
+              PROD_TAG: $(prodTag)

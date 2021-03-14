@@ -1,0 +1,8 @@
+{
+  "realm": "powerpilot",
+  "auth-server-url": "https://auth.westpower.powerpilot.nz/auth",
+  "ssl-required": "external",
+  "resource": "react-admin",
+  "public-client": true,
+  "confidential-port": 0
+}
